@@ -18,7 +18,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
     client_ip = websocket.client.host if websocket.client else 'unknown'
 
-    await manager.connect(websocket, client_id, client_ip)
+    conn_id = await manager.connect(websocket, client_id, client_ip)
     await websocket.send_json({
         "type": "connection",
         "message": "Connected to server",
@@ -35,7 +35,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     except Exception as e:
         logger.error(f'Error with client {client_id}: {e}')
     finally:
-        await manager.disconnect(websocket)
+        await manager.disconnect(conn_id)
 
 
 @router.post("/notify")
@@ -48,12 +48,12 @@ async def send_message(message: str):
         "message": message,
         "timestamp": datetime.now().isoformat()
     }
-
     await manager.broadcast(message)
+    total_connections = await manager.backend.get_connection_count()
 
     return {
         "status": "sent",
-        "recipients": manager.get_connection_count(),
+        "recipients": total_connections,
         "message": message
     }
 
@@ -65,19 +65,22 @@ async def initiate_shutdown():
         return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"error": "Shutdown already in progress"})
 
     manager.request_shutdown()
+    await manager.backend.publish_shutdown_signal()
+    total_connections = await manager.backend.get_connection_count()
+
     return {
         "status": "shutdown_initiated",
-        "active_connections": manager.get_connection_count(),
+        "active_connections": total_connections,
         "shutdown_timeout": manager.shutdown_timeout
     }
 
 
 @router.get("/status")
-async def get_status():
-    """Get connection status"""
+async def get_full_status():
+    """Get connection full status"""
+    full_status = await manager.get_full_status()
     return {
-        "status": manager.get_status(),
-        "active_connections": manager.get_connection_count(),
+        "status": full_status,
         "timestamp": datetime.now().isoformat()
     }
 

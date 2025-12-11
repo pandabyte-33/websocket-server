@@ -35,6 +35,7 @@ async def notification_task():
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown"""
     logger.info('Server starting up...')
+    await manager.initialize()
 
     def signal_handler(signum, frame):
         logger.info(f'Received signal {signum}')
@@ -42,16 +43,17 @@ async def lifespan(app: FastAPI):
 
     signal.signal(signal.SIGTERM, signal_handler)
     signal.signal(signal.SIGINT, signal_handler)
-    notifs_task = asyncio.create_task(notification_task())
+    # notifs_task = asyncio.create_task(notification_task())
 
     yield
 
     logger.info('Server shutting down...')
-    notifs_task.cancel()
+    # notifs_task.cancel()
     if manager.state == ManagerState.RUNNING:
         manager.request_shutdown()
     if manager.shutdown_task:
         await manager.shutdown_task
+    await manager.close()
 
 
 app = FastAPI(
