@@ -6,4 +6,23 @@ services:
     container_name: websocket-redis
     ports:
       - "6379:6379"
-    command: redis-server
+
+  celery-worker:
+    build: .
+    container_name: websocket-celery-worker
+    command: celery -A src.celery.app worker --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - WEBSOCKET_URL=http://host.docker.internal:8000
+    depends_on:
+      - redis
+
+  celery-beat:
+    build: .
+    container_name: websocket-celery-beat
+    command: celery -A src.celery.app beat --loglevel=info
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - WEBSOCKET_URL=http://host.docker.internal:8000
+    depends_on:
+      - redis

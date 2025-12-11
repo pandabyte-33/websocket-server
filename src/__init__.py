@@ -1,9 +1,7 @@
 from .websocket.redis_backend import RedisBackend
 from .websocket.manager import ConnectionManager
-from .config import Settings
+from .config import settings
 
-
-settings = Settings()
 
 SHUTDOWN_TIMEOUT_MINS = 30
 REDIS_URL = settings.REDIS_URL
