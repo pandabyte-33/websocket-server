@@ -1,11 +1,9 @@
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, status
-from fastapi.responses import JSONResponse
 from starlette.status import WS_1001_GOING_AWAY
 
 from src import manager
 from src.logging import logger
-from .schemas import ManagerState
 
 
 router = APIRouter(tags=["websocket"])
@@ -58,29 +56,12 @@ async def send_message(message: str):
     }
 
 
-@router.post("/shutdown")
-async def initiate_shutdown():
-    """Manually initiate a graceful shutdown"""
-    if manager.state != ManagerState.RUNNING:
-        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"error": "Shutdown already in progress"})
-
-    manager.request_shutdown()
-    await manager.backend.publish_shutdown_signal()
-    total_connections = await manager.backend.get_connection_count()
-
-    return {
-        "status": "shutdown_initiated",
-        "active_connections": total_connections,
-        "shutdown_timeout": manager.shutdown_timeout
-    }
-
-
 @router.get("/status")
-async def get_full_status():
-    """Get connection full status"""
-    full_status = await manager.get_full_status()
+async def get_status():
+    """Get connection status"""
+    stat = await manager.get_status()
     return {
-        "status": full_status,
+        "status": stat,
         "timestamp": datetime.now().isoformat()
     }
 

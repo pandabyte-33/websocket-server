@@ -5,7 +5,7 @@ from src.config import settings
 from src.celery.app import celery_app
 
 
-DEFAULT_MESSAGE = 'ping'
+DEFAULT_MESSAGE = 'test message'
 
 
 @celery_app.task(name='src.celery.tasks.send_notification')

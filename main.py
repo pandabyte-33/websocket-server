@@ -3,7 +3,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from src.websocket.routers import router
-from src.websocket.schemas import ManagerState
 from src.logging import logger
 from src import manager
 
@@ -23,17 +22,13 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    logger.info('Server shutting down...')
-    if manager.state == ManagerState.RUNNING:
-        manager.request_shutdown()
     if manager.shutdown_task:
         await manager.shutdown_task
-    await manager.close()
 
 
 app = FastAPI(
     title="WebSocket Server",
-    description="Real-time for sending real-time notifications",
+    description="WebSocket server for sending real-time notifications with graceful shutdown",
     version="1.0.0",
     lifespan=lifespan
 )

@@ -1,17 +1,22 @@
 import asyncio
 import uuid
+import time
 from datetime import datetime, timedelta
+from enum import Enum
 from typing import Dict, Optional
 from fastapi import WebSocket
-from starlette.status import WS_1001_GOING_AWAY
 
 from src.logging import logger
-from .schemas import ManagerState
 from .redis_backend import RedisBackend
 
 
 SECONDS_IN_MINUTE = 60
 SHUTDOWN_CHECK_INTERVAL = 10
+
+
+class ManagerState(Enum):
+    RUNNING = 'running'
+    SHUTDOWN_REQUESTED = 'shutdown_requested'
 
 
 class ClientInfo:
@@ -47,11 +52,6 @@ class ConnectionManager:
         await self.backend.initialize()
         logger.info(f"Connection manager initialized with backend (worker: {self.backend.worker_id})")
 
-    async def close(self):
-        """Close the connection manager and backend"""
-        await self.backend.cleanup_worker_connections()
-        await self.backend.close()
-
     async def connect(self, websocket: WebSocket, client_id: str, ip_address: str):
         """Register a new connection"""
         await websocket.accept()
@@ -65,7 +65,7 @@ class ConnectionManager:
             await self.backend.add_connection(conn_id, client_info.to_dict())
 
         total_connections = await self.backend.get_connection_count()
-        logger.info(f'Client {client_id} connected from {ip_address} (conn: {conn_id}).'
+        logger.info(f'Client {client_id} connected from {ip_address} (conn: {conn_id}). '
                     f'Total connections: {total_connections}')
 
         return conn_id
@@ -92,13 +92,11 @@ class ConnectionManager:
         """Check if the server should accept new connections"""
         return self.state == ManagerState.RUNNING
 
-    async def get_full_status(self) -> dict:
+    async def get_status(self) -> dict:
         """Get the current status"""
         status = {
             'state': self.state.value,
-            'active_connections': await self.backend.get_connection_count(),
-            'worker_id': self.backend.worker_id,
-            'worker_connections': self.get_local_connection_count()
+            'active_connections': await self.backend.get_connection_count()
         }
 
         if self.shutdown_requested_at:
@@ -132,30 +130,6 @@ class ConnectionManager:
         for conn_id in disconnected:
             await self.disconnect(conn_id)
 
-    async def close_all_connections(self):
-        """Force close all active connections on this worker"""
-        logger.info(f'Closing all {len(self.local_connections)} worker {self.backend.worker_id} active connections...')
-
-        for conn_id, connection in list(self.local_connections.items()):
-            try:
-                await connection.close(code=WS_1001_GOING_AWAY, reason='Server shutting down')
-            except Exception as e:
-                logger.error(f'Error closing connection {conn_id}: {e}')
-
-        async with self.lock:
-            self.local_connections.clear()
-            self.connection_metadata.clear()
-
-        async with self.lock:
-            conn_ids = list(self.local_connections.keys())
-            self.local_connections.clear()
-            self.connection_metadata.clear()
-
-            for conn_id in conn_ids:
-                await self.backend.remove_connection(conn_id)
-
-        logger.info(f'All worker {self.backend.worker_id} connections closed')
-
     def request_shutdown(self):
         """Initiate a graceful shutdown process"""
         if self.state != ManagerState.RUNNING:
@@ -172,22 +146,25 @@ class ConnectionManager:
         logger.info(f'Monitoring shutdown for worker {self.backend.worker_id} - will force close after {int(self.shutdown_timeout.total_seconds()) // SECONDS_IN_MINUTE} minutes')
 
         while self.state == ManagerState.SHUTDOWN_REQUESTED:
+            message = {
+                'message': 'ping',
+                'timestamp': datetime.now().isoformat()
+            }
+
+            await self._broadcast_to_local_connections(message)
             active_count = self.get_local_connection_count()
             elapsed = datetime.now() - self.shutdown_requested_at
             remaining = self.shutdown_timeout - elapsed
-
-            logger.info(f'Shutdown monitor for worker {self.backend.worker_id}: {active_count} active connections, {elapsed.total_seconds():.0f}s elapsed, {remaining.total_seconds():.0f}s remaining')
+            logger.info(f'Shutdown monitor for worker {self.backend.worker_id}: {active_count} active connections, '
+                        f'{elapsed.total_seconds():.0f}s elapsed, {max(0, int(remaining.total_seconds())):.0f}s remaining')
 
             if active_count == 0:
-                logger.info('All connections closed naturally for worker {self.backend.worker_id} - proceeding to shutdown')
+                logger.info(f'All connections closed naturally for worker {self.backend.worker_id} - proceeding to shutdown')
                 break
-
             if elapsed >= self.shutdown_timeout:
                 logger.warning(f'Shutdown timeout for worker {self.backend.worker_id} reached after {int(self.shutdown_timeout.total_seconds()) // SECONDS_IN_MINUTE} minutes - forcing closure')
-                await self.close_all_connections()
                 break
 
-            await asyncio.sleep(self.shutdown_check_interval)
+            time.sleep(self.shutdown_check_interval)
 
-        self.state = ManagerState.SHUTDOWN
         logger.info(f'Shutdown completed for worker {self.backend.worker_id}')
