@@ -2,7 +2,7 @@ import os
 import asyncio
 import json
 import redis.asyncio as aioredis
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Any, Callable
 
 from src.logging import logger
 
@@ -17,7 +17,6 @@ class RedisBackend:
         self.redis_url = redis_url
         self.redis: Optional[aioredis.Redis] = None
         self.pubsub_broadcast: Optional[aioredis.client.PubSub] = None
-        self.pubsub_shutdown: Optional[aioredis.client.PubSub] = None
         self.worker_id = str(os.getpid())
 
         self.connections_key = "websocket:connections"
@@ -78,11 +77,6 @@ class RedisBackend:
         """Get total connection count across all workers"""
         count = await self.redis.hlen(self.connections_key)
         return count
-
-    async def get_all_connections(self) -> Dict[str, str]:
-        """Get all connections (conn_id -> worker_id mapping)"""
-        connections = await self.redis.hgetall(self.connections_key)
-        return connections
 
     async def publish_broadcast(self, message: dict):
         """Publish a broadcast message to all workers"""
